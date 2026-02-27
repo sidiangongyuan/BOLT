@@ -1,132 +1,124 @@
-# QuantV2X: A Fully Quantized Multi-Agent System for Cooperative Perception
-[![website](https://img.shields.io/badge/Website-Explore%20Now-blueviolet?style=flat&logo=google-chrome)](https://quantv2x.github.io/QuantV2X/)
-[![paper](https://img.shields.io/badge/arXiv-Paper-<COLOR>.svg)](http://arxiv.org/abs/2509.03704)
+# BOLT: Base-Free Online Lightweight Adaptation for Heterogeneous Cooperative Perception
 
-[Seth Z. Zhao*](https://sethzhao506.github.io/), [Huizhi Zhang*](https://zhang-huizhi.github.io/), [Zhaowei Li](https://www.linkedin.com/in/zhaowei-li-892480/), [Juntong Peng](https://juntongpeng.github.io/), [Anthony Chui](https://www.linkedin.com/in/anthony-chui-499b31274/), [Zewei Zhou](https://zewei-zhou.github.io/), [Zonglin Meng](https://scholar.google.com/citations?user=rlKJHMcAAAAJ&hl=zh-CN), [Hao Xiang](https://scholar.google.com/citations?user=04j4RzkAAAAJ&hl=en), [Zhiyu Huang](https://mczhi.github.io/), [Fujia Wang](https://www.linkedin.com/in/fujiawang/), [Ran Tian](https://thomasrantian.github.io/), [Chenfeng Xu](https://www.chenfengx.com/), [Bolei Zhou](https://boleizhou.github.io/), [Jiaqi Ma](https://mobility-lab.seas.ucla.edu/about/)
+This is the official implementation of **BOLT** (Base-free Online Lightweight adapTation).
 
-![teaser](assets/quantv2x_teaser.png)
+## Overview
 
-This is the official implementation of "QuantV2X: A Fully Quantized Multi-Agent System for Cooperative Perception". In this work, we address the problems of inefficiency and performance degradation for cooperative perception in real-world resource-constrained scenarios. We illustrate the system-level latency bottleneck in full-precision systems and introduce QuantV2X, a fully quantized multi-agent system for cooperative perception that enables efficient model inference and multi-agent communication with maximum perception performance preservation while meeting the requirements of real-world deployment. To the best of our knowledge, this is the first work to demonstrate the viability and practicality of a fully quantized intermediate fusion system for future real-world deployment.
+Cooperative perception enables autonomous agents to overcome occlusion and limited field of view by sharing intermediate features. However, existing heterogeneous methods universally require a collaboratively trained fusion module, assuming access to multi-agent data during training. In practice, vehicles from different manufacturers ship with independently trained detectors, making joint cooperative training infeasible.
 
-This work is part of our broader vision of building an __efficient and scalable V2X ecosystem__, comprising data-efficient pretraining with [CooPre](https://arxiv.org/pdf/2408.11241), training-efficient multi-agent learning with [TurboTrain](https://arxiv.org/pdf/2508.04682), and inference-efficient cooperative perception with [QuantV2X](http://arxiv.org/abs/2509.03704).
+BOLT addresses this **base-free** setting by inserting a lightweight adaptive plugin (~0.9M parameters) between the neighbor encoder and the frozen fusion module. The plugin is trained **online at test time** via ego-as-teacher distillation, using the ego agent's own predictions as supervision — no ground-truth labels, no cooperative training data.
 
-## ICCV 2025 DriveX Tutorials
-- [Notebook Tutorial](docs/notebook/QuantV2X_DriveX_Tutorial.ipynb)
+## Highlights
 
-## News
-- **`2025/10`**: This codebase will be featured as the main tutorial repository for [ICCV 2025 Tutorial: Beyond Self-Driving: Exploring Three Levels of Driving Automation](https://drivex-tutorial.github.io/).
-- **`2025/09`**: QuantV2X is selected as **Oral Presentation** in [ICCV 2025 X-Sense Workshop](https://x-sense-ego-exo.github.io/index.html).
-- **`2025/09`**: [QuantV2X](http://arxiv.org/abs/2509.03704) paper release and initial codebase release.
+- **Base-free**: No cooperative training required. Each agent uses its own independently trained detector.
+- **Online adaptation**: Plugin parameters are updated at test time via self-supervised distillation.
+- **Lightweight**: Only ~0.9M trainable parameters in the plugin module.
+- **Label-free**: Uses ego predictions as pseudo-labels — no ground-truth annotations needed at adaptation time.
+- **Versatile**: Works across multiple encoder pairs (PointPillar, SECOND, Camera) and fusion strategies.
 
-## ✅ Currently Supported Features
-- [√] Full-Precision Baseline Training and Inference on V2X-Real Dataset, covering the original functionality of [V2X-Real](https://github.com/ucla-mobility/V2X-Real) codebase.
-- [√] Codebook Learning Training and Inference Pipeline.
-- [√] Post-Training Quantization (PTQ) Pipeline.
-- [√] Support on OPV2V(-H) and DAIR-V2X datasets.
-- [√] TensorRT Deployment Pipeline.
+## Results
 
-## V2X-Real Data Download
+Evaluated on three benchmarks: **DAIR-V2X**, **OPV2V**, and **V2X-Real**.
 
-For V2X-Real dataset, please check [website](https://mobility-lab.seas.ucla.edu/v2x-real/) to download the data. The data is in OPV2V format. 
+BOLT consistently recovers ego-only performance from severely degraded base-free baselines across all settings.
 
-After downloading the data, please put the data in the following structure:
-```shell
-├── v2xreal
-│   ├── train
-|      |── 2023-03-17-15-53-02_1_0
-│   ├── validate
-│   ├── test
-```
+## Data Preparation
 
-## Other Data Preparation
-- OPV2V: Please refer to [this repo](https://github.com/DerrickXuNu/OpenCOOD). You also need to download `additional-001.zip` which stores data for camera modality.
-- OPV2V-H: Please refer to [Huggingface Hub](https://huggingface.co/datasets/yifanlu/OPV2V-H) and refer to [Downloading datasets](https://huggingface.co/docs/hub/datasets-downloading) tutorial for the usage.
-- DAIR-V2X-C: Download the data from [this page](https://thudair.baai.ac.cn/index). We use complemented annotation, so please also follow the instruction of [this page](https://siheng-chen.github.io/dataset/dair-v2x-c-complemented/). 
-
-It is recommended that you download **V2X-Real** and try them first. Please refer to the original github issues if you have trouble downloading **OPV2V** and **DAIR-V2X-C**.
+- **DAIR-V2X-C**: Download from [DAIR-V2X](https://thudair.baai.ac.cn/index) with [complemented annotations](https://siheng-chen.github.io/dataset/dair-v2x-c-complemented/).
+- **OPV2V**: Download from [OpenCOOD](https://github.com/DerrickXuNu/OpenCOOD). Also download `additional-001.zip` for camera data.
+- **OPV2V-H**: Download from [Huggingface Hub](https://huggingface.co/datasets/yifanlu/OPV2V-H).
+- **V2X-Real**: Download from the [official website](https://mobility-lab.seas.ucla.edu/v2x-real/).
 
 ## Installation
 
-### Step 1: Basic Installation
-
 ```bash
-conda create -n quantv2x python=3.8 pytorch==1.12.0 torchvision==0.13.0 torchaudio==0.12.0 cudatoolkit=11.6 -c pytorch -c conda-forge
-conda activate quantv2x
-# install dependency
+# Create environment
+conda create -n bolt python=3.8 pytorch==1.12.0 torchvision==0.13.0 cudatoolkit=11.6 -c pytorch -c conda-forge
+conda activate bolt
+
+# Install dependencies
 pip install -r requirements.txt
-# install this project. It's OK if EasyInstallDeprecationWarning shows up.
+
+# Install spconv (match your CUDA version)
+pip install spconv-cu116
+
+# Install project
 python setup.py develop
-```
 
-### Step 2: Install Spconv 2.x
-
-To install **spconv 2.x**, check the [table](https://github.com/traveller59/spconv#spconv-spatially-sparse-convolution-library) to run the installation command. For example we have cudatoolkit 11.6, then we should run
-
-```bash
-pip install spconv-cu116 # match your cudatoolkit version
-```
-
-### Step 3: Bbx IoU cuda version compile
-
-Install bbx nms calculation cuda version
-
-```bash
+# Compile IoU CUDA ops
 python opencood/utils/setup.py build_ext --inplace
 ```
 
-## Tutorials
-- [Tutorial of Baseline Training and Inference on V2X-Real dataset](docs/Tutorial_V2X-Real_Baseline.md)
-- [Tutorial of Codebook Learning on V2X-Real dataset](docs/Tutorial_V2X-Real_Codebook.md)
-- [Tutorial of PTQ on V2X-Real dataset](docs/Tutorial_V2X-Real_PTQ.md)
-- [Tutorial of Training and Inference on other datasets](docs/Tutorial_Other_Datasets.md)
-- [Tutorial of TensorRT Export](docs/Tutorial_Tensorrt_Export.md)
+## Usage
 
-We welcome the integration of other datasets from the community. Please submit a pull request for potential codebase integration.
+### Step 1: Train Single-Agent Encoders (HEAL Stage 1)
+
+Train each encoder independently on single-agent data:
+
+```bash
+python -m opencood.tools.train \
+  -y opencood/hypes_yaml/dairv2x/HEAL/lidar_pyramid_local.yaml
+```
+
+### Step 2: Train HEAL Fusion Backbone (Stage 2)
+
+Align encoders into a shared protocol space:
+
+```bash
+python -m opencood.tools.train \
+  -y opencood/hypes_yaml/dairv2x/HEAL/lidar_pp_second_stage2.yaml \
+  --stage1_model_dir <path_to_stage1_checkpoint>
+```
+
+### Step 3: Online Adaptation with BOLT
+
+Run online test-time training with the plugin:
+
+```bash
+python -m opencood.tools.online_adapt \
+  --model_dir <path_to_heal_checkpoint> \
+  --output_dir <output_path> \
+  --lr 1e-4 --epochs 3 \
+  --teacher_conf_thresh 0.3 \
+  --boost_weight 0.1 --boost_lo 0.1 --boost_hi 0.3
+```
+
+### Inference
+
+```bash
+python -m opencood.tools.inference \
+  --model_dir <path_to_checkpoint>
+```
+
+## Project Structure
+
+```
+opencood/
+├── models/
+│   ├── plugin/              # BOLT adaptive plugin (AdaIN + residual blocks)
+│   ├── heter_pyramid_collab.py   # Main heterogeneous pyramid model
+│   ├── heter_encoders.py         # Multi-modality encoder registry
+│   └── fuse_modules/             # Fusion strategies (pyramid, attention, etc.)
+├── tools/
+│   ├── online_adapt.py      # Online TTT with ego-as-teacher distillation
+│   ├── train.py             # Standard training
+│   ├── train_stage2.py      # HEAL stage-2 alignment training
+│   └── inference.py         # Evaluation
+├── hypes_yaml/              # Config files for DAIR-V2X, OPV2V, V2X-Real
+└── data_utils/              # Dataset loaders and pre/post processors
+```
 
 ## Acknowledgement
-The codebase is built upon [HEAL](https://github.com/yifanlu0227/HEAL) and [V2X-Real](https://github.com/ucla-mobility/V2X-Real).
+
+This codebase is built upon [HEAL](https://github.com/yifanlu0227/HEAL) and [OpenCOOD](https://github.com/DerrickXuNu/OpenCOOD).
 
 ## Citation
-If you find this repository useful for your research, please consider giving us a star 🌟 and citing our paper.
- ```bibtex
-@article{zhao2025quantv2x,
-  title={QuantV2X: A Fully Quantized Multi-Agent System for Cooperative Perception},
-  author={Zhao, Seth Z and Zhang, Huizhi and Li, Zhaowei and Peng, Juntong and Chui, Anthony and Zhou, Zewei and Meng, Zonglin and Xiang, Hao and Huang, Zhiyu and Wang, Fujia and others},
-  journal={arXiv preprint arXiv:2509.03704},
+
+If you find this work useful, please cite:
+
+```bibtex
+@article{bolt2025,
+  title={BOLT: Base-Free Online Lightweight Adaptation for Heterogeneous Cooperative Perception},
   year={2025}
 }
 ```
-
-Other useful citations:
- ```bibtex
-@article{zhao2024coopre,
-  title={CooPre: Cooperative Pretraining for V2X Cooperative Perception},
-  author={Zhao, Seth Z and Xiang, Hao and Xu, Chenfeng and Xia, Xin and Zhou, Bolei and Ma, Jiaqi},
-  journal={arXiv preprint arXiv:2408.11241},
-  year={2024}
-}
-
-@article{zhou2025turbotrain,
-  title={TurboTrain: Towards Efficient and Balanced Multi-Task Learning for Multi-Agent Perception and Prediction},
-  author={Zhou, Zewei and Zhao, Seth Z. and Cai, Tianhui and Huang, Zhiyu and Zhou, Bolei and Ma, Jiaqi},
-  journal={arXiv preprint arXiv:2508.04682},
-  year={2025}
-}
-
-@article{zhou2024v2xpnp,
- title={V2XPnP: Vehicle-to-Everything Spatio-Temporal Fusion for Multi-Agent Perception and Prediction},
- author={Zhou, Zewei and Xiang, Hao and Zheng, Zhaoliang and Zhao, Seth Z. and Lei, Mingyue and Zhang, Yun and Cai, Tianhui and Liu, Xinyi and Liu, Johnson and Bajji, Maheswari and Xia, Xin and Huang, Zhiyu and Zhou, Bolei and Ma, Jiaqi},
- journal={arXiv preprint arXiv:2412.01812},
- year={2024}
-}
-
-@article{xiang2024v2xreal,
-  title={V2X-Real: a Largs-Scale Dataset for Vehicle-to-Everything Cooperative Perception},
-  author={Xiang, Hao and Zheng, Zhaoliang and Xia, Xin and Xu, Runsheng and Gao, Letian and Zhou, Zewei and Han, Xu and Ji, Xinkai and Li, Mingxi and Meng, Zonglin and others},
-  journal={arXiv preprint arXiv:2403.16034},
-  year={2024}
-}
-```
-
-## Other Development Team Members
-[Aiden Wong](https://www.linkedin.com/in/aidwong)
