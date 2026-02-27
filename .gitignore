@@ -1,0 +1,210 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Caches
+.pytest_cache/
+.mypy_cache/
+.pytype/
+.pyre/
+.cache/
+.coverage
+htmlcov/
+.ipynb_checkpoints/
+.DS_Store
+
+# Model checkpoints
+*.pth
+*.pt
+*.ckpt
+
+# Logs & runtime
+logs/
+nohup.out
+profile_results.txt
+run_profile_all.sh
+
+# Paper source & notes
+writing/
+hetero_works/
+fig_work/
+figures/
+docs/
+assets/
+prompts.md
+AGENTS.md
+DIRECT_HETER.md
+
+# AI tool configs
+.claude/
+.mcp.json
+
+# Scripts — only keep train.sh, run_heal_stage2.sh, inference.sh
+scripts/inference_mc/
+scripts/train_codebook_mc/
+scripts/train_compressor_mc/
+scripts/train_ddp/
+scripts/build_token_cache_*
+scripts/run_*
+scripts/rerun_*
+scripts/setup_stamp_*
+scripts/combine_figure.py
+scripts/plot_*.py
+scripts/visualize_*
+scripts/USAGE.md
+scripts/inference/inference_quant.sh
+scripts/inference/run_*
+scripts/train/run_openjoin_*
+scripts/train/run_dino_*
+scripts/train/run_heal_homo_*
+
+# Entire modules — not BOLT related
+opencood/quant/
+opencood/visualization/
+
+# Unrelated models
+opencood/models/center_point*.py
+opencood/models/ciassd.py
+opencood/models/fpvrcnn.py
+opencood/models/pixor*.py
+opencood/models/voxel_net*.py
+opencood/models/mnasnet.py
+opencood/models/mobilenetv2.py
+opencood/models/regnet.py
+opencood/models/resnet.py
+opencood/models/onnx_wrapper.py
+opencood/models/point_pillar_disconet*.py
+opencood/models/point_pillar_uncertainty.py
+opencood/models/point_pillar_baseline_multiscale.py
+opencood/models/second_ssfa*.py
+opencood/models/lift_splat_shoot_voxel.py
+opencood/models/heter_baseline_collab_codebook*.py
+opencood/models/heter_model_baseline_mc.py
+opencood/models/heter_model_baseline_ms.py
+opencood/models/heter_model_early_mc.py
+opencood/models/heter_model_late_mc.py
+opencood/models/heter_model_protocol.py
+opencood/models/heter_model_token.py
+opencood/models/heter_pyramid_collab_codebook*.py
+opencood/models/heter_pyramid_collab_dino.py
+opencood/models/heter_pyramid_collab_mc.py
+opencood/models/heter_pyramid_collab_onnx.py
+opencood/models/heter_pyramid_single_clip.py
+opencood/models/heter_pyramid_single_mc.py
+opencood/models/heter_pyramid_stamp_collab.py
+opencood/models/comm_modules/
+
+# opencood/tools — exclude non-essential
+opencood/tools/visualize_*
+opencood/tools/analyze_*
+opencood/tools/profiler/
+opencood/tools/assemble_*
+opencood/tools/heal_tools.py
+opencood/tools/adapt_plugin.py
+opencood/tools/build_token_cache*
+opencood/tools/upgrade_token_cache*
+opencood/tools/build_trt*
+opencood/tools/inference_quant.py
+opencood/tools/inference_onnx*
+opencood/tools/onnx_export*
+opencood/tools/inference_w_noise.py
+opencood/tools/inference_mc*
+opencood/tools/inference_heter_in_order_mc.py
+opencood/tools/inference_utils_mc.py
+opencood/tools/smoke_test_*
+opencood/tools/pose_graph_*
+opencood/tools/train_stage3.py
+opencood/tools/train_ddp.py
+opencood/tools/multi_gpu_utils.py
+opencood/tools/assemble_late_fusion_ckpt.py
+
+# hypes_yaml — exclude non-essential methods
+opencood/hypes_yaml/*/Codebook/
+opencood/hypes_yaml/*/CameraOnly/
+opencood/hypes_yaml/*/LiDAROnly/
+opencood/hypes_yaml/*/Hetero/
+opencood/hypes_yaml/*/STAMP/
+opencood/hypes_yaml/v2x_real/Naive_Compressor/
+opencood/hypes_yaml/exemplar.yaml
+opencood/hypes_yaml/readme.md
+
+# Unrelated losses
+opencood/loss/center_point_loss.py
+opencood/loss/ciassd_loss.py
+opencood/loss/clip_loss.py
+opencood/loss/fpvrcnn_loss.py
+opencood/loss/pixor_loss.py
+opencood/loss/voxel_net_loss.py
+opencood/loss/point_pillar_disconet_loss.py
+opencood/loss/point_pillar_uncertainty_loss.py
+opencood/loss/uncertainty_loss_old.py
+opencood/loss/*_mc.py
+
+# Unrelated datasets
+opencood/data_utils/datasets/early_*.py
+opencood/data_utils/datasets/late_*.py
+opencood/data_utils/datasets/intermediate_2stage_*.py
+
+# Unrelated post_processors
+opencood/data_utils/post_processor/ciassd_postprocessor.py
+opencood/data_utils/post_processor/fpvrcnn_postprocessor.py
+opencood/data_utils/post_processor/bev_postprocessor.py
+opencood/data_utils/post_processor/uncertainty_voxel_postprocessor.py
+opencood/data_utils/post_processor/base_postprocessor_multi_class.py
+
+# Unrelated sub_modules
+opencood/models/sub_modules/auto_encoder.py
+opencood/models/sub_modules/box_align_v2.py
+opencood/models/sub_modules/cia_ssd_utils.py
+opencood/models/sub_modules/codebook.py
+opencood/models/sub_modules/codebook_utils.py
+opencood/models/sub_modules/convgru.py
+opencood/models/sub_modules/dense_head.py
+opencood/models/sub_modules/detr_module.py
+opencood/models/sub_modules/matcher.py
+opencood/models/sub_modules/matcher_v2.py
+opencood/models/sub_modules/matcher_v3.py
+opencood/models/sub_modules/roi_head.py
+opencood/models/sub_modules/voxel_rcnn_head.py
+opencood/models/sub_modules/voxel_roi_pooling.py
+opencood/models/sub_modules/vsa.py
+opencood/models/sub_modules/pose_graph_optim.py
+
+# Unrelated fuse_modules
+opencood/models/fuse_modules/stamp_fuse.py
+opencood/models/fuse_modules/when2com_fuse.py
+opencood/models/fuse_modules/where2comm_attn.py
+opencood/models/fuse_modules/v2v_fuse.py
+opencood/models/fuse_modules/pyramid_fuse_onnx.py
+
+# Unrelated utils
+opencood/utils/bessel_utils.py
+opencood/utils/box_utils_mc.py
+opencood/utils/draco_compression.py
+opencood/utils/eval_utils_mc.py
+opencood/utils/img2hdf5.py
+opencood/utils/keypoint_utils.py
+opencood/utils/max_consensus.py
+opencood/utils/subsampling_utils.py
+opencood/utils/cleanup_utils.py
+
+# Misc
+*.backup
+opencood/tools/inference_heter_in_order.py
+
+# Unrelated basedatasets
+opencood/data_utils/datasets/basedataset/opv2v_basedataset_cl.py
+opencood/data_utils/datasets/basedataset/v2xset_basedataset.py
+opencood/data_utils/datasets/basedataset/v2xsim_basedataset.py
+
+# Unrelated modality_assign
+opencood/modality_assign/v2xset_*
+
+# Unrelated models (early/late fusion)
+opencood/models/heter_model_early.py
+opencood/models/heter_model_late.py
