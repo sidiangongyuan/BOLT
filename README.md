@@ -1,20 +1,38 @@
-# BOLT: Base-Free Online Lightweight Adaptation for Heterogeneous Cooperative Perception
+<div align="center">
 
-This is the official implementation of **BOLT** (Base-free Online Lightweight adapTation).
+# BOLT
+
+### Base-Free Online Lightweight Adaptation for Heterogeneous Cooperative Perception
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python 3.8](https://img.shields.io/badge/Python-3.8-blue.svg)](https://www.python.org/)
+[![PyTorch 1.12](https://img.shields.io/badge/PyTorch-1.12-ee4c2c.svg)](https://pytorch.org/)
+
+</div>
+
+<p align="center">
+  <img src="images/Teaser.png" width="100%"/>
+</p>
 
 ## Overview
 
-Cooperative perception enables autonomous agents to overcome occlusion and limited field of view by sharing intermediate features. However, existing heterogeneous methods universally require a collaboratively trained fusion module, assuming access to multi-agent data during training. In practice, vehicles from different manufacturers ship with independently trained detectors, making joint cooperative training infeasible.
+Existing heterogeneous cooperative perception methods universally require a collaboratively trained fusion module, assuming access to multi-agent data during training. In practice, vehicles from different manufacturers ship with independently trained detectors, making joint cooperative training infeasible.
 
-BOLT addresses this **base-free** setting by inserting a lightweight adaptive plugin (~0.9M parameters) between the neighbor encoder and the frozen fusion module. The plugin is trained **online at test time** via ego-as-teacher distillation, using the ego agent's own predictions as supervision — no ground-truth labels, no cooperative training data.
+**BOLT** addresses this *base-free* setting by inserting a lightweight adaptive plugin (~0.9M parameters) between the neighbor encoder and the frozen fusion module. The plugin is trained online at test time via ego-as-teacher distillation — no ground-truth labels, no cooperative training data.
 
-## Highlights
+<p align="center">
+  <img src="images/Framework.png" width="100%"/>
+</p>
 
-- **Base-free**: No cooperative training required. Each agent uses its own independently trained detector.
-- **Online adaptation**: Plugin parameters are updated at test time via self-supervised distillation.
-- **Lightweight**: Only ~0.9M trainable parameters in the plugin module.
-- **Label-free**: Uses ego predictions as pseudo-labels — no ground-truth annotations needed at adaptation time.
-- **Versatile**: Works across multiple encoder pairs (PointPillar, SECOND, Camera) and fusion strategies.
+### Highlights
+
+| | Feature | Description |
+|---|---|---|
+| 1 | **Base-free** | No cooperative training required. Each agent uses its own independently trained detector. |
+| 2 | **Online adaptation** | Plugin parameters are updated at test time via self-supervised distillation. |
+| 3 | **Lightweight** | Only ~0.9M trainable parameters in the plugin module. |
+| 4 | **Label-free** | Uses ego predictions as pseudo-labels — no annotations needed at adaptation time. |
+| 5 | **Versatile** | Works across multiple encoder pairs (PointPillar, SECOND, Camera) and fusion strategies. |
 
 ## Results
 
