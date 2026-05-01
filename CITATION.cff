@@ -35,7 +35,7 @@ authors:
     given-names: "Yongcai"
     affiliation: "Renmin University of China"
     email: "ycw@ruc.edu.cn"
-repository-code: "https://github.com/sidiangongyuan/BOLT-Base-Free-Online-Lightweight-Adaptation-for-Heterogeneous-Cooperative-Perception"
+repository-code: "https://github.com/sidiangongyuan/BOLT"
 license: MIT
 keywords:
   - cooperative perception

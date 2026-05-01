@@ -8,7 +8,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.8](https://img.shields.io/badge/Python-3.8-blue.svg)](https://www.python.org/)
 [![PyTorch 1.12](https://img.shields.io/badge/PyTorch-1.12-ee4c2c.svg)](https://pytorch.org/)
-[![Stars](https://img.shields.io/github/stars/sidiangongyuan/BOLT-Base-Free-Online-Lightweight-Adaptation-for-Heterogeneous-Cooperative-Perception?style=social)](https://github.com/sidiangongyuan/BOLT-Base-Free-Online-Lightweight-Adaptation-for-Heterogeneous-Cooperative-Perception)
+[![Stars](https://img.shields.io/github/stars/sidiangongyuan/BOLT?style=social)](https://github.com/sidiangongyuan/BOLT)
 
 <p align="center"><b>
 Drop a 0.9M-parameter plugin between your detector and a stranger's detector,<br/>
