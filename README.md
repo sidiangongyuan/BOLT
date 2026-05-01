@@ -61,7 +61,7 @@ Across **DAIR-V2X** and **OPV2V**, with multiple LiDAR/camera encoder pairs and 
 
 ## 📊 Results
 
-Evaluated on **DAIR-V2X** (real V2I), **OPV2V** (simulated V2V), and **V2X-Real**.
+Evaluated on **DAIR-V2X** (real V2I) and **OPV2V** (simulated V2V).
 
 In the preparation-free setting, vanilla unadapted fusion typically falls *below* ego-only detection — cooperation actively *hurts*. BOLT reverses this:
 
@@ -96,68 +96,75 @@ See the paper for full tables, ablations, and additional qualitative results.
 
 ## ⚙️ Installation
 
-> **TL;DR:** the codebase is built on top of [**HEAL**](https://github.com/yifanlu0227/HEAL). Please follow HEAL's environment setup first; BOLT has no extra system dependencies on top of HEAL.
-
 ```bash
-# 1. Follow HEAL's installation instructions:
-#    https://github.com/yifanlu0227/HEAL#installation
-#    (creates the conda env, installs pytorch / spconv / cumm / etc.)
-
-# 2. Then clone this repo and finalize:
 git clone https://github.com/sidiangongyuan/BOLT.git
 cd BOLT
+
+# Conda env
+conda create -n bolt python=3.8 pytorch==1.12.0 torchvision==0.13.0 cudatoolkit=11.6 \
+  -c pytorch -c conda-forge
+conda activate bolt
+
+# Python packages
 pip install -r requirements.txt
+pip install spconv-cu116                 # match your CUDA version
+
+# Project-local extensions
 python setup.py develop
 python opencood/utils/setup.py build_ext --inplace
 ```
 
-If you can run HEAL's training and inference scripts, you can run BOLT.
+> The codebase reuses some infrastructure from [HEAL](https://github.com/yifanlu0227/HEAL) and [OpenCOOD](https://github.com/DerrickXuNu/OpenCOOD); if you run into platform-specific issues with `spconv` / `cumm`, those repos' troubleshooting tips also apply here.
 
 ---
 
 ## 📦 Data Preparation
 
-Same datasets and same preprocessing as HEAL — see [HEAL's data preparation](https://github.com/yifanlu0227/HEAL#data-preparation) for the full instructions.
+We evaluate on the following datasets:
 
-| Dataset | Source |
-|---|---|
-| **DAIR-V2X-C** | [DAIR-V2X](https://thudair.baai.ac.cn/index) with [complemented annotations](https://siheng-chen.github.io/dataset/dair-v2x-c-complemented/) |
-| **OPV2V** | [OpenCOOD](https://github.com/DerrickXuNu/OpenCOOD) (also `additional-001.zip` for camera) |
-| **OPV2V-H** | [Hugging Face](https://huggingface.co/datasets/yifanlu0227/OPV2V-H) |
-| **V2X-Real** | [Official site](https://mobility-lab.seas.ucla.edu/v2x-real/) |
+| Dataset | Used | Source |
+|---|---|---|
+| **DAIR-V2X-C** | ✅ | [DAIR-V2X](https://thudair.baai.ac.cn/index) with [complemented annotations](https://siheng-chen.github.io/dataset/dair-v2x-c-complemented/) |
+| **OPV2V** | ✅ | [OpenCOOD](https://github.com/DerrickXuNu/OpenCOOD) (also `additional-001.zip` for camera) |
+| **OPV2V-H** | ⏳ TODO | [Hugging Face](https://huggingface.co/datasets/yifanlu0227/OPV2V-H) — not used in this work; planned for future support. |
+| **V2X-Real** | ⏳ TODO | [Official site](https://mobility-lab.seas.ucla.edu/v2x-real/) — not used in this work; planned for future support. |
+
+Each dataset's directory layout is configured through the YAML files under [`opencood/hypes_yaml/`](opencood/hypes_yaml/). Update the dataset paths there before training or inference.
 
 ---
 
 ## 🚀 Quick Start
 
-The full BOLT pipeline has three stages. The first two come straight from HEAL; only the third is BOLT-specific.
+BOLT's deployment-time contribution is a single command: a frozen detector pair plus an online-adapted plugin. Before running it, you need a trained base model (single-agent detectors and a fused backbone). The minimal reproducible flow is:
 
-### Stage 1 — Train each agent's single-agent detector (HEAL Stage 1)
+### Step 1 — Train your single-agent detectors
 
-Each agent independently trains its own detector. No collaboration involved.
+Train one detector per modality / encoder using your own data. Configs are under `opencood/hypes_yaml/`:
 
 ```bash
 python -m opencood.tools.train \
   -y opencood/hypes_yaml/dairv2x/HEAL/lidar_pyramid_local.yaml
 ```
 
-### Stage 2 — Train a HEAL-style fusion backbone (HEAL Stage 2)
+Repeat for each agent's modality (e.g., LiDAR PointPillars, LiDAR SECOND, camera Lift-Splat-Shoot). These detectors are trained **independently** — no cross-agent coordination.
 
-This produces the *frozen* base model that BOLT will adapt around. Consult HEAL for details.
+### Step 2 — Build the heterogeneous base checkpoint
+
+Assemble the single-agent encoders into a base model that BOLT will plug into. Encoders, the fusion module, and the detection head will be **frozen** afterwards.
 
 ```bash
 python -m opencood.tools.train \
   -y opencood/hypes_yaml/dairv2x/HEAL/lidar_pp_second_stage2.yaml \
-  --stage1_model_dir <path_to_stage1_checkpoint>
+  --stage1_model_dir <path_to_stage1_checkpoints>
 ```
 
-### Stage 3 — Online adaptation with BOLT 🟢 *(this repo's contribution)*
+### Step 3 — Run BOLT online adaptation 🟢 *(this is BOLT)*
 
-At deployment, encoders / fusion / head all stay frozen. Only the plugin updates, online, with one gradient step per incoming sample, supervised by the ego detector's own high-confidence predictions.
+At deployment, the ~0.9M-parameter plugin is the only trainable component. It is updated **online**: one gradient step per incoming test sample, supervised by the ego detector's high-confidence predictions (no labels, no cooperative training data).
 
 ```bash
 python -m opencood.tools.online_adapt \
-  --model_dir <path_to_heal_checkpoint> \
+  --model_dir <path_to_base_checkpoint> \
   --output_dir <output_path> \
   --lr 1e-4 --epochs 1 \
   --teacher_conf_thresh 0.3 \
@@ -170,7 +177,7 @@ python -m opencood.tools.online_adapt \
 python -m opencood.tools.inference --model_dir <path_to_checkpoint>
 ```
 
-For ready-made pipelines, see [`scripts/`](scripts/) — including `scripts/inference/inference.sh` and the multi-agent assembly scripts under `scripts/more_agents/`.
+For ready-made runners, see [`scripts/inference/inference.sh`](scripts/inference/inference.sh) and the multi-agent demos under [`scripts/more_agents/`](scripts/more_agents/).
 
 ---
 
@@ -184,17 +191,19 @@ opencood/
 │   ├── heter_encoders.py             # Multi-modality encoder registry
 │   └── fuse_modules/                 # Fusion strategies (pyramid, attention, ...)
 ├── tools/
-│   ├── online_adapt.py               # Online TTT with ego-as-teacher distillation
-│   ├── train.py                      # Standard training (HEAL stages)
+│   ├── online_adapt.py               # 🟢 Online TTT with ego-as-teacher distillation
+│   ├── train.py                      # Standard training
 │   └── inference.py                  # Evaluation
-├── hypes_yaml/                       # Configs for DAIR-V2X, OPV2V, V2X-Real
+├── hypes_yaml/                       # Configs for DAIR-V2X, OPV2V
 └── data_utils/                       # Dataset loaders + pre/post processors
 
-scripts/                              # Reproducible runners
-├── inference/                        # Off-the-shelf inference scripts
-├── train/                            # End-to-end training scripts
+scripts/
+├── inference/                        # Off-the-shelf inference
+├── train/                            # End-to-end training
 └── more_agents/                      # Multi-agent (3+ cars) assembly + adaptation
 ```
+
+> **Note.** This release contains the minimal code needed to reproduce BOLT's core method. Auxiliary scripts used only for paper-specific ablations, visualization, and analysis are not included; the public release will track only the method itself.
 
 ---
 
