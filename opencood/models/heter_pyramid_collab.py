@@ -121,14 +121,25 @@ class HeterPyramidCollab(nn.Module):
                                               args['compressor']['compress_ratio'])
 
         """
-        Optional: camera -> lidar plugin (base-free TTT).
+        Optional: neighbor-feature plugin for base-free online adaptation.
         """
         self.plugin_enabled = False
-        self.plugin_src_modality = None
+        self.plugin_src_modalities = []
+        self.plugin = None
+        self.plugins = nn.ModuleDict()
         plugin_cfg = args.get("plugin", None)
         if isinstance(plugin_cfg, dict) and plugin_cfg.get("enable", False):
             self.plugin_enabled = True
-            self.plugin_src_modality = plugin_cfg.get("src_modality", "m2")
+            raw_src_modalities = plugin_cfg.get("src_modalities", None)
+            if raw_src_modalities is None:
+                raw_src_modalities = [plugin_cfg.get("src_modality", "m2")]
+            elif isinstance(raw_src_modalities, str):
+                raw_src_modalities = [
+                    x.strip() for x in raw_src_modalities.split(",") if x.strip()
+                ]
+            else:
+                raw_src_modalities = [str(x).strip() for x in raw_src_modalities if str(x).strip()]
+            self.plugin_src_modalities = raw_src_modalities
             plugin_args = plugin_cfg.get("args", {})
             from opencood.models.plugin.adain_res_adapter import (
                 AdaINResAdapterConfig,
@@ -144,7 +155,13 @@ class HeterPyramidCollab(nn.Module):
                 adain_alpha_init_logit=float(plugin_args.get("adain_alpha_init_logit", 10.0)),
                 gate_init_logit=float(plugin_args.get("gate_init_logit", 0.0)),
             )
-            self.plugin = AdaINResAdapterPlugin(cfg)
+            if len(self.plugin_src_modalities) <= 1:
+                self.plugin = AdaINResAdapterPlugin(cfg)
+            else:
+                self.plugins = nn.ModuleDict({
+                    modality_name: AdaINResAdapterPlugin(cfg)
+                    for modality_name in self.plugin_src_modalities
+                })
 
         self.model_train_init()
         # check again which module is not fixed.
@@ -170,11 +187,11 @@ class HeterPyramidCollab(nn.Module):
         agent_modality_list: list,
     ) -> torch.Tensor:
         """
-        Apply plugin to neighbor (camera) features in agent-order tensor.
+        Apply plugin to configured neighbor modalities in agent-order tensor.
 
         Assumption (consistent with fusion modules): in each sample, agent index 0 is ego.
         """
-        if not self.plugin_enabled or self.plugin_src_modality is None:
+        if not self.plugin_enabled or not self.plugin_src_modalities:
             return heter_feature_2d
 
         if heter_feature_2d.ndim != 4:
@@ -197,8 +214,12 @@ class HeterPyramidCollab(nn.Module):
             new_feats = [ego_feat]
             for j in range(1, n):
                 fj = feats_b[j : j + 1]
-                if mods_b[j] == self.plugin_src_modality:
-                    fj = self.plugin(fj, ego_feat)
+                src_modality = mods_b[j]
+                if src_modality in self.plugin_src_modalities:
+                    if src_modality in self.plugins:
+                        fj = self.plugins[src_modality](fj, ego_feat)
+                    elif self.plugin is not None:
+                        fj = self.plugin(fj, ego_feat)
                 new_feats.append(fj)
             out_chunks.append(torch.cat(new_feats, dim=0))
 

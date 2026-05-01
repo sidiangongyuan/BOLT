@@ -5,7 +5,7 @@
 import torch
 from torch import nn
 from efficientnet_pytorch import EfficientNet
-from torchvision.models.resnet import resnet101
+from torchvision.models.resnet import resnet50, resnet101
 import torch.nn.functional as F
 from opencood.utils.camera_utils import bin_depths
 from opencood.models.sub_modules.torch_transformation_utils import \
@@ -233,6 +233,109 @@ class CamEncode_Resnet101(nn.Module):  # 提取图像特征进行图像编码
                 return None, new_x
 
 
+class CamEncode_Resnet50(nn.Module):  # 提取图像特征进行图像编码
+    def __init__(
+        self,
+        D,
+        C,
+        downsample,
+        ddiscr,
+        mode,
+        use_gt_depth=False,
+        depth_supervision=True,
+        pretrained=False,
+    ):
+        super(CamEncode_Resnet50, self).__init__()
+        self.D = D
+        self.C = C
+        self.downsample = downsample
+        self.d_min = ddiscr[0]
+        self.d_max = ddiscr[1]
+        self.num_bins = ddiscr[2]
+        self.mode = mode
+        self.use_gt_depth = use_gt_depth
+        self.depth_supervision = depth_supervision
+
+        try:
+            trunk = resnet50(pretrained=pretrained, zero_init_residual=True)
+        except Exception as exc:
+            if pretrained:
+                print(f"[WARN] failed to load pretrained Resnet50 ({exc}); fallback to random init.")
+            trunk = resnet50(pretrained=False, zero_init_residual=True)
+
+        self.conv1 = trunk.conv1
+        self.bn1 = trunk.bn1
+        self.relu = nn.ReLU()
+        self.maxpool = trunk.maxpool
+        self.layer1 = trunk.layer1
+        self.layer2 = trunk.layer2
+        self.layer3 = nn.Identity()
+
+        if not use_gt_depth:
+            self.depth_head = nn.Conv2d(512, self.D, kernel_size=1, padding=0)
+
+        self.image_head = nn.Conv2d(512, self.C, kernel_size=1, padding=0)
+
+    def get_depth_dist(self, x, eps=1e-5):
+        return F.softmax(x, dim=1)
+
+    def get_gt_depth_dist(self, x):
+        target = self.training
+        torch.clamp_max_(x, self.d_max)
+        depth_indices, mask = bin_depths(
+            x, self.mode, self.d_min, self.d_max, self.num_bins, target=target
+        )
+        depth_indices = depth_indices[
+            :,
+            self.downsample // 2::self.downsample,
+            self.downsample // 2::self.downsample,
+        ]
+        onehot_dist = F.one_hot(depth_indices.long()).permute(0, 3, 1, 2)
+
+        if not target:
+            mask = mask[
+                :,
+                self.downsample // 2::self.downsample,
+                self.downsample // 2::self.downsample,
+            ].unsqueeze(1)
+            onehot_dist *= mask
+
+        return onehot_dist, depth_indices
+
+    def resnet50_forward(self, x):
+        x = self.conv1(x)
+        x = self.bn1(x)
+        x = self.relu(x)
+        x = self.maxpool(x)
+
+        x = self.layer1(x)
+        x = self.layer2(x)
+        return x
+
+    def get_resnet_features(self, x):
+        return self.resnet50_forward(x)
+
+    def forward(self, x):
+        x_img = x[:, :3, :, :].clone()
+        features = self.get_resnet_features(x_img)
+        x_img_feature = self.image_head(features)
+
+        if self.depth_supervision or self.use_gt_depth:
+            x_depth = x[:, 3, :, :]
+            depth_gt, depth_gt_indices = self.get_gt_depth_dist(x_depth)
+
+        if self.use_gt_depth:
+            new_x = depth_gt.unsqueeze(1) * x_img_feature.unsqueeze(2)
+            return None, new_x
+
+        depth_logit = self.depth_head(features)
+        depth = self.get_depth_dist(depth_logit)
+        new_x = depth.unsqueeze(1) * x_img_feature.unsqueeze(2)
+        if self.depth_supervision:
+            return (depth_logit, depth_gt_indices), new_x
+        return None, new_x
+
+
 class BevEncode(nn.Module):
     def __init__(self, inC, outC):  # inC: 64  outC: not 1 for object detection
         super(BevEncode, self).__init__()
@@ -402,4 +505,3 @@ class BevEncodeMSFusion(nn.Module):
         x_fuse = self.down_layer(self.up_layer1(self.up_layer2(x3_fuse, x2_fuse), x1_fuse)) # 4 x 64 x 120 x 120
 
         return x_single, x_fuse
-

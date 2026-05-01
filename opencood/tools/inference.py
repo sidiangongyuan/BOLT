@@ -100,6 +100,10 @@ def test_parser():
                         help="Force gate=1 (all ones) at inference for gate ablation.")
     parser.add_argument('--drop_camera', action='store_true',
                         help="Zero out camera features at inference (for HEAL model ablation).")
+    parser.add_argument('--strict_n_car', type=int, default=0,
+                        help='Strict N-car filtering: only evaluate scenes with exactly N agents (0=disabled)')
+    parser.add_argument('--assignment_path', type=str, default=None,
+                        help='Override modality assignment JSON file path')
     opt = parser.parse_args()
     return opt
 
@@ -264,7 +268,15 @@ def main():
             )
         hypes["use_cav"] = int(opt.use_cav)
         print(f"[inference] use_cav={hypes['use_cav']} (fusion.core_method={hypes['fusion']['core_method']})")
-    
+
+    if opt.strict_n_car > 0:
+        hypes['strict_n_car'] = opt.strict_n_car
+        print(f"[inference] strict_n_car={hypes['strict_n_car']} (only evaluate scenes with exactly {opt.strict_n_car} agents)")
+
+    if opt.assignment_path:
+        hypes['heter']['assignment_path'] = opt.assignment_path
+        print(f"[inference] override assignment_path={opt.assignment_path}")
+
     # build dataset for each noise setting
     print('Dataset Building')
     opencood_dataset = build_dataset(hypes, visualize=True, train=False, calibrate=False)

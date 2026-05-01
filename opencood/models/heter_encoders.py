@@ -6,7 +6,13 @@
 import torch
 import torch.nn as nn
 import numpy as np
-from opencood.models.sub_modules.lss_submodule import Up, CamEncode, BevEncode, CamEncode_Resnet101
+from opencood.models.sub_modules.lss_submodule import (
+    Up,
+    CamEncode,
+    BevEncode,
+    CamEncode_Resnet101,
+    CamEncode_Resnet50,
+)
 from opencood.utils.camera_utils import gen_dx_bx, cumsum_trick, QuickCumsum, depth_discretization
 from opencood.models.sub_modules.pillar_vfe import PillarVFE
 from opencood.models.sub_modules.point_pillar_scatter import PointPillarScatter
@@ -106,6 +112,19 @@ class LiftSplatShoot(nn.Module):
         elif self.camera_encoder_type == 'Resnet101':
             self.camencode = CamEncode_Resnet101(self.D, self.camC, self.downsample, \
                 self.grid_conf['ddiscr'], self.grid_conf['mode'], args['use_depth_gt'], args['depth_supervision'])
+        elif self.camera_encoder_type == 'Resnet50':
+            self.camencode = CamEncode_Resnet50(
+                self.D,
+                self.camC,
+                self.downsample,
+                self.grid_conf['ddiscr'],
+                self.grid_conf['mode'],
+                args['use_depth_gt'],
+                args['depth_supervision'],
+                pretrained=bool(args.get('camera_encoder_pretrained', False)),
+            )
+        else:
+            raise ValueError(f"Unsupported camera_encoder: {self.camera_encoder_type}")
     
     def create_frustum(self):
         # make grid in image plane

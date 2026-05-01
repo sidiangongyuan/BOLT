@@ -1,0 +1,63 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite our paper as below."
+title: "BOLT: Online Lightweight Adaptation for Preparation-Free Heterogeneous Cooperative Perception"
+abstract: >-
+  Most existing heterogeneous cooperative perception methods depend on prior preparation
+  such as offline joint training or tailored collaborator-model adaptation, which is
+  generally impractical when agents are independently trained by different developers.
+  We study preparation-free heterogeneous cooperative perception, where agents use
+  independently trained single-agent detectors with no pre-deployment coordination,
+  and show that direct cross-agent fusion in this setting greatly underperforms ego-only
+  perception. We present BOLT, a lightweight plug-and-play module that adapts incoming
+  neighbor features online via ego-as-teacher distillation, using only ego predictions
+  without ground-truth labels. With only 0.9M trainable parameters, BOLT improves AP@50
+  by up to 32.3 points over unadapted fusion and consistently outperforms ego-only
+  results on DAIR-V2X and OPV2V across different encoder pairs and fusion strategies.
+type: software
+authors:
+  - family-names: "Yang"
+    given-names: "Kang"
+    affiliation: "Renmin University of China"
+    email: "y1127238112@gmail.com"
+  - family-names: "Bu"
+    given-names: "Tianci"
+    affiliation: "National University of Defense Technology; Renmin University of China"
+    email: "btc010001@gmail.com"
+  - family-names: "Wang"
+    given-names: "Peng"
+    affiliation: "Renmin University of China"
+    email: "peng.wang@ruc.edu.cn"
+  - family-names: "Li"
+    given-names: "Deying"
+    affiliation: "Renmin University of China"
+    email: "deyingli@ruc.edu.cn"
+  - family-names: "Wang"
+    given-names: "Yongcai"
+    affiliation: "Renmin University of China"
+    email: "ycw@ruc.edu.cn"
+repository-code: "https://github.com/sidiangongyuan/BOLT-Base-Free-Online-Lightweight-Adaptation-for-Heterogeneous-Cooperative-Perception"
+license: MIT
+keywords:
+  - cooperative perception
+  - autonomous driving
+  - heterogeneous cooperation
+  - test-time adaptation
+  - 3d object detection
+  - knowledge distillation
+preferred-citation:
+  type: article
+  title: "BOLT: Online Lightweight Adaptation for Preparation-Free Heterogeneous Cooperative Perception"
+  year: 2026
+  # journal: "arXiv preprint"
+  # doi: "10.48550/arXiv.ARXIV_ID"
+  authors:
+    - family-names: "Yang"
+      given-names: "Kang"
+    - family-names: "Bu"
+      given-names: "Tianci"
+    - family-names: "Wang"
+      given-names: "Peng"
+    - family-names: "Li"
+      given-names: "Deying"
+    - family-names: "Wang"
+      given-names: "Yongcai"

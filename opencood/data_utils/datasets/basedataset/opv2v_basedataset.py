@@ -50,6 +50,8 @@ class OPV2VBaseDataset(Dataset):
         else:
             self.max_cav = params['train_params']['max_cav']
 
+        self.strict_n_car = int(params.get('strict_n_car', 0))  # 0=不启用过滤
+
         self.load_lidar_file = True if 'lidar' in params['input_source'] or self.visualize else False
         self.load_camera_file = True if 'camera' in params['input_source'] else False
         self.load_depth_file = True if 'depth' in params['input_source'] else False
@@ -105,10 +107,19 @@ class OPV2VBaseDataset(Dataset):
             else:
                 m_id_in_scene = [None] * len(cav_list) # No assignment found
             
-            # Check if all required modalities (cav_m_id) are present in the scenario
-            if not all(m in m_id_in_scene for m in self.cav_m_id):
-                print(f"Scenario {scenario_name} does not contain all required modalities. Skipping.")
-                continue
+            # Check modality compatibility
+            # In strict_n_car mode: scene modalities must be subset of mapping_dict
+            # In normal mode: mapping_dict modalities must all be in scene
+            if hasattr(self, 'strict_n_car') and self.strict_n_car > 0:
+                # Strict N-car: allow scenes with fewer modalities than mapping_dict
+                if not all(m in self.cav_m_id for m in m_id_in_scene):
+                    print(f"Scenario {scenario_name} contains unsupported modalities. Skipping.")
+                    continue
+            else:
+                # Normal mode: require all mapping_dict modalities in scene
+                if not all(m in m_id_in_scene for m in self.cav_m_id):
+                    print(f"Scenario {scenario_name} does not contain all required modalities. Skipping.")
+                    continue
 
             filtered_cav_list = []
             filtered_mod_dict = {}
@@ -120,6 +131,16 @@ class OPV2VBaseDataset(Dataset):
             print(f"Filtered cav_list for scenario {scenario_name}: {filtered_mod_dict}")
 
             cav_list = filtered_cav_list
+
+            # ===== STRICT N-CAR FILTERING =====
+            if hasattr(self, 'strict_n_car') and self.strict_n_car > 0:
+                if len(cav_list) != self.strict_n_car:
+                    print(f"[Strict-{self.strict_n_car}-car] Skipping scenario {scenario_name}: "
+                          f"has {len(cav_list)} agents, expected {self.strict_n_car}")
+                    continue
+                print(f"[Strict-{self.strict_n_car}-car] ✓ Including scenario {scenario_name}: "
+                      f"exactly {len(cav_list)} agents")
+            # ==================================
 
             self.scenario_database.update({i: OrderedDict()})
 
@@ -226,7 +247,10 @@ class OPV2VBaseDataset(Dataset):
                 else:
                     self.scenario_database[i][cav_id]['ego'] = False
             i += 1
-        print("len:", self.len_record[-1])
+        if self.len_record:
+            print("len:", self.len_record[-1])
+        else:
+            print("len: 0 (no scenarios passed filtering)")
 
     def retrieve_base_data(self, idx):
         """
@@ -319,7 +343,7 @@ class OPV2VBaseDataset(Dataset):
         return data
 
     def __len__(self):
-        return self.len_record[-1]
+        return self.len_record[-1] if self.len_record else 0
 
     def __getitem__(self, idx):
         """

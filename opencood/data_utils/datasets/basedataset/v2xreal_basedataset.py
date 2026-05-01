@@ -849,7 +849,18 @@ class V2XREALBaseDataset(Dataset):
         )
     
     def get_ext_int(self, params, camera_id):
-        camera_coords = np.array(params["cam%d" % camera_id]["cords"]).astype(
+        cam_key = f"cam{camera_id}"
+        if cam_key not in params:
+            fallback_key = f"cam{camera_id + 1}"
+            if fallback_key in params:
+                cam_key = fallback_key
+            else:
+                available = sorted([k for k in params.keys() if k.startswith("cam")])
+                raise KeyError(
+                    f"Missing camera calibration for {cam_key}; available camera keys: {available}"
+                )
+
+        camera_coords = np.array(params[cam_key]["cords"]).astype(
             np.float32)
         camera_to_lidar = x1_to_x2(
             camera_coords, params["lidar_pose_clean"]
@@ -857,7 +868,7 @@ class V2XREALBaseDataset(Dataset):
         camera_to_lidar = camera_to_lidar @ np.array(
             [[0, 0, 1, 0], [1, 0, 0, 0], [0, -1, 0, 0], [0, 0, 0, 1]],
             dtype=np.float32)  # UE4 coord to opencv coord
-        camera_intrinsic = np.array(params["cam%d" % camera_id]["intrinsic"]).astype(
+        camera_intrinsic = np.array(params[cam_key]["intrinsic"]).astype(
             np.float32
         )
         return camera_to_lidar, camera_intrinsic

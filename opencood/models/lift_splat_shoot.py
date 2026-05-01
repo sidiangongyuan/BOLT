@@ -12,7 +12,13 @@ from torchvision.models.resnet import resnet18
 from icecream import ic
 
 from opencood.utils.camera_utils import gen_dx_bx, cumsum_trick, QuickCumsum, depth_discretization
-from opencood.models.sub_modules.lss_submodule import Up, CamEncode, BevEncode, CamEncode_Resnet101
+from opencood.models.sub_modules.lss_submodule import (
+    Up,
+    CamEncode,
+    BevEncode,
+    CamEncode_Resnet101,
+    CamEncode_Resnet50,
+)
 from opencood.models.sub_modules.downsample_conv import DownsampleConv
 from matplotlib import pyplot as plt
 
@@ -44,6 +50,19 @@ class LiftSplatShoot(nn.Module):
         elif self.camera_encoder_type == 'Resnet101':
             self.camencode = CamEncode_Resnet101(self.D, self.camC, self.downsample, \
                 self.grid_conf['ddiscr'], self.grid_conf['mode'], args['use_depth_gt'], args['depth_supervision'])
+        elif self.camera_encoder_type == 'Resnet50':
+            self.camencode = CamEncode_Resnet50(
+                self.D,
+                self.camC,
+                self.downsample,
+                self.grid_conf['ddiscr'],
+                self.grid_conf['mode'],
+                args['use_depth_gt'],
+                args['depth_supervision'],
+                pretrained=bool(args.get('camera_encoder_pretrained', False)),
+            )
+        else:
+            raise ValueError(f"Unsupported camera_encoder: {self.camera_encoder_type}")
 
         self.bevencode = BevEncode(inC=self.camC, outC=self.bevout_feature)
         self.shrink_flag = False

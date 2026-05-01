@@ -1,11 +1,12 @@
 """
 Online Test-Time Training (TTT) for base-free heterogeneous cooperative perception.
 
-v3.1: Ego-as-Teacher distillation with enhancement signal + multi-epoch.
+v3.1: Ego-as-Teacher distillation with enhancement signal.
     - Preservation loss: distill where teacher is confident (don't hurt ego detections)
     - Enhancement loss: boost student confidence where teacher is uncertain but has
       some signal (encourage fusion to leverage neighbor info)
-    - Multi-epoch: warmup epochs (train only) + final epoch (train + evaluate)
+    - Default protocol is single-pass; optional multi-pass warmup is supported when
+      epochs > 1
 
 All encoders / fusion / heads remain frozen; only plugin parameters are updated.
 
@@ -13,7 +14,7 @@ Typical usage:
   python -m opencood.tools.online_adapt \
     --model_dir /path/to/DirectHeter_base_free_lidar_camera \
     --output_dir /path/to/output \
-    --lr 1e-4 --epochs 3 --teacher_conf_thresh 0.3 \
+    --lr 1e-4 --epochs 1 --teacher_conf_thresh 0.3 \
     --boost_weight 0.1 --boost_lo 0.1 --boost_hi 0.3 \
     --plugin_adain_alpha_init_logit -10
 """
@@ -25,15 +26,19 @@ import copy
 import importlib
 import json
 import os
+import random
+from pathlib import Path
 
+import numpy as np
 import torch
 import torch.nn.functional as F
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Subset
 
+import opencood.data_utils
 import opencood.hypes_yaml.yaml_utils as yaml_utils
 from opencood.data_utils.datasets import build_dataset
 from opencood.tools import train_utils
-from opencood.utils import eval_utils
+from opencood.utils import eval_utils, eval_utils_mc
 from opencood.utils.common_utils import update_dict
 
 
@@ -51,12 +56,22 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--comm_range", type=float, default=100.0)
     p.add_argument("--use_cav", type=int, default=2)
     p.add_argument("--num_workers", type=int, default=4)
+    p.add_argument("--shuffle_test", action="store_true",
+                    help="Shuffle the test stream order for ordering-sensitivity experiments")
+    p.add_argument("--test_order_seed", type=int, default=0,
+                    help="Random seed used only for test-stream shuffling when --shuffle_test is set")
     p.add_argument("--fuse_method", type=str, default="weighted",
                     choices=["weighted", "max", "mean", "attn", "v2xvit"],
                     help="Fusion aggregation method inside PyramidFusion")
 
     # Plugin config
     p.add_argument("--src_modality", type=str, default="m2")
+    p.add_argument(
+        "--src_modalities",
+        type=str,
+        default="",
+        help="Comma-separated modality names for multi-src plugin routing, e.g. m2,m3,m4",
+    )
     p.add_argument("--plugin_hidden", type=int, default=128)
     p.add_argument("--plugin_blocks", type=int, default=3)
     p.add_argument("--plugin_gn_groups", type=int, default=16)
@@ -68,7 +83,7 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--weight_decay", type=float, default=1e-4)
     p.add_argument("--grad_clip", type=float, default=5.0)
     p.add_argument("--epochs", type=int, default=1,
-                    help="Total epochs. epochs-1 are warmup (train only), last epoch trains+evaluates.")
+                    help="Number of passes over the test stream. Default 1; if >1, epochs-1 are warmup-only and the last pass trains+evaluates.")
 
     # Distillation — preservation
     p.add_argument("--cls_weight", type=float, default=1.0)
@@ -99,6 +114,27 @@ def _parse_args() -> argparse.Namespace:
                     help="Override postprocessor score_threshold (default: use config value)")
     p.add_argument("--convergence_interval", type=int, default=0,
                     help="Compute running AP every N samples during eval epoch (0 = disabled)")
+    p.add_argument("--export_frame_interval", type=int, default=0,
+                    help="Export readiness comparison panels every N samples during the eval epoch (0 = disabled)")
+    p.add_argument("--export_frame_dir", type=str, default="",
+                    help="Directory for exported readiness panels and frame metadata (default: <output_dir>/readiness_frames)")
+    p.add_argument("--export_frame_limit", type=int, default=0,
+                    help="Maximum number of readiness panels to export (0 = no limit)")
+    p.add_argument("--export_frame_render_mode", type=str, default="inset",
+                    choices=["full", "crop", "inset"],
+                    help="Panel variant to export for readiness visualization")
+    p.add_argument("--export_frame_crop_size", type=float, default=32.0,
+                    help="Crop size in meters used for automatic zoom selection when exporting readiness frames")
+    p.add_argument("--export_frame_score_thresh", type=float, default=0.3,
+                    help="Score threshold used for readiness BEV rendering")
+    p.add_argument("--export_frame_ppm", type=int, default=10,
+                    help="Pixels-per-meter used for exported BEV readiness panels")
+    p.add_argument("--strict_n_car", type=int, default=0,
+                    help="Strict N-car filtering: only evaluate scenes with exactly N agents (0=disabled)")
+    p.add_argument("--max_eval_samples", type=int, default=0,
+                    help="Optional early stop after N samples during evaluation/debugging (0 = full stream)")
+    p.add_argument("--assignment_path", type=str, default=None,
+                    help="Override modality assignment JSON file path")
     return p.parse_args()
 
 
@@ -106,6 +142,8 @@ def _parse_args() -> argparse.Namespace:
 # Helpers
 # ---------------------------------------------------------------------------
 def _set_seed(seed: int) -> None:
+    random.seed(seed)
+    np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
 
@@ -113,9 +151,16 @@ def _set_seed(seed: int) -> None:
 def _inject_plugin_cfg(hypes: dict, opt: argparse.Namespace) -> dict:
     hypes = copy.deepcopy(hypes)
     hypes.setdefault("model", {}).setdefault("args", {})
+    if str(getattr(opt, "src_modalities", "")).strip():
+        src_modalities = [
+            x.strip() for x in str(opt.src_modalities).split(",") if x.strip()
+        ]
+    else:
+        src_modalities = [opt.src_modality]
     hypes["model"]["args"]["plugin"] = {
         "enable": True,
-        "src_modality": opt.src_modality,
+        "src_modality": src_modalities[0],
+        "src_modalities": src_modalities,
         "args": {
             "in_channels": 64,
             "hidden_channels": opt.plugin_hidden,
@@ -128,8 +173,11 @@ def _inject_plugin_cfg(hypes: dict, opt: argparse.Namespace) -> dict:
     return hypes
 
 
-def _init_result_stats():
-    """Create fresh result_stat dicts for AP evaluation."""
+_EVAL_IOUS = (0.3, 0.5, 0.7)
+
+
+def _init_result_stats_single():
+    """Create fresh result_stat dicts for single-class AP evaluation."""
     def _make():
         return {
             0.3: {"tp": [], "fp": [], "gt": 0, "score": []},
@@ -137,6 +185,100 @@ def _init_result_stats():
             0.7: {"tp": [], "fp": [], "gt": 0, "score": []},
         }
     return _make(), _make(), _make(), _make()  # overall, short, middle, long
+
+
+def _init_result_stats_mc() -> dict:
+    """Create fresh result_stat dict for multi-class overall mAP evaluation."""
+    return {
+        class_name: {
+            iou_thresh: {"tp": [], "fp": [], "gt": 0}
+            for iou_thresh in _EVAL_IOUS
+        }
+        for class_name in opencood.data_utils.SUPER_CLASS_MAP.keys()
+    }
+
+
+def _use_multi_class_eval(hypes: dict) -> bool:
+    fusion_cfg = hypes.get("fusion", {})
+    dataset_name = str(fusion_cfg.get("dataset", "")).lower()
+    fusion_core = str(fusion_cfg.get("core_method", "")).lower()
+    num_class = int(hypes.get("num_class", hypes.get("postprocess", {}).get("num_class", 1)))
+    return dataset_name == "v2xreal" or "3class" in fusion_core or num_class > 1
+
+
+def _parse_mc_eval_tensors(post_ret):
+    pred_box_tensor, pred_score, gt_box_tensor = post_ret[0], post_ret[1], post_ret[2]
+    gt_label_tensor = post_ret[3] if len(post_ret) > 3 else None
+    if gt_label_tensor is None:
+        raise RuntimeError("multi-class evaluation requires gt_label_tensor from dataset.post_process")
+
+    device = gt_box_tensor.device
+    gt_label_tensor = gt_label_tensor.view(-1).to(device=device, dtype=torch.long)
+
+    if pred_score is None:
+        pred_conf = torch.empty((0,), device=device)
+        pred_label_tensor = torch.empty((0,), device=device, dtype=torch.long)
+    elif pred_score.dim() == 2 and pred_score.shape[1] >= 2:
+        pred_conf = pred_score[:, 0]
+        pred_label_tensor = pred_score[:, 1].to(device=device, dtype=torch.long)
+    else:
+        raise RuntimeError("MC eval expects pred_score to contain both score and label")
+
+    if pred_box_tensor is None:
+        pred_box_tensor = gt_box_tensor.new_empty((0,) + tuple(gt_box_tensor.shape[1:]))
+
+    return pred_box_tensor, pred_conf, pred_label_tensor, gt_box_tensor, gt_label_tensor
+
+
+def _update_result_stats_mc(
+    pred_boxes: torch.Tensor,
+    pred_scores: torch.Tensor,
+    pred_labels: torch.Tensor,
+    gt_boxes: torch.Tensor,
+    gt_labels: torch.Tensor,
+    result_stat: dict,
+) -> None:
+    for class_id, class_name in enumerate(result_stat.keys(), start=1):
+        keep_pred = pred_labels == class_id
+        keep_gt = gt_labels == class_id
+        for iou_thresh in _EVAL_IOUS:
+            eval_utils_mc.caluclate_tp_fp(
+                pred_boxes[keep_pred, ...],
+                pred_scores[keep_pred],
+                gt_boxes[keep_gt, ...],
+                result_stat[class_name],
+                iou_thresh,
+            )
+
+
+def _calculate_map_mc(result_stat: dict, iou_thresh: float) -> float:
+    aps = [eval_utils_mc.calculate_ap(result_stat[class_name], iou_thresh)[0]
+           for class_name in result_stat.keys()]
+    return float(sum(aps) / len(aps)) if aps else 0.0
+
+
+def _maybe_shuffle_test_dataset(dataset, opt: argparse.Namespace, out_dir: str):
+    if not opt.shuffle_test:
+        return dataset
+
+    num_samples = len(dataset)
+    order = np.random.RandomState(opt.test_order_seed).permutation(num_samples).tolist()
+    order_path = os.path.join(out_dir, "test_order.json")
+    with open(order_path, "w") as f:
+        json.dump(
+            {
+                "shuffle_test": True,
+                "test_order_seed": int(opt.test_order_seed),
+                "num_samples": int(num_samples),
+                "order": order,
+            },
+            f,
+        )
+    print(
+        f"[online-ttt] shuffle_test enabled: test_order_seed={opt.test_order_seed} "
+        f"(saved to {order_path})"
+    )
+    return Subset(dataset, order)
 
 
 def _expand_anchor_mask(mask: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
@@ -270,6 +412,86 @@ def _run_neighbor_teacher_forward(model, cav_content, device):
     return teacher_out
 
 
+def _run_noplugin_coop_forward(model, cav_content):
+    """Cooperative forward with plugin disabled, preserving the original agent set."""
+    with torch.no_grad():
+        saved_plugin = model.plugin_enabled
+        model.plugin_enabled = False
+        output = model(cav_content)
+        model.plugin_enabled = saved_plugin
+    return output
+
+
+def _left_hand_from_hypes(hypes: dict) -> bool:
+    test_dir = str(hypes.get("test_dir", ""))
+    return any(flag in test_dir for flag in ("OPV2V", "V2XSET", "V2XREAL"))
+
+
+def _post_ret_to_vis_result(post_ret):
+    pred_box_tensor, pred_score, gt_box_tensor = post_ret[0], post_ret[1], post_ret[2]
+    vis_result = {
+        "pred_box_tensor": pred_box_tensor,
+        "pred_score": pred_score,
+        "score_tensor": pred_score,
+        "gt_box_tensor": gt_box_tensor,
+    }
+    if len(post_ret) > 3:
+        vis_result["gt_label_tensor"] = post_ret[3]
+    return vis_result
+
+
+def _compute_running_metrics_single(result_stat):
+    snapshot = copy.deepcopy(result_stat)
+    ap30, _, _ = eval_utils.calculate_ap(snapshot, 0.3)
+    ap50, _, _ = eval_utils.calculate_ap(snapshot, 0.5)
+    ap70, _, _ = eval_utils.calculate_ap(snapshot, 0.7)
+    return float(ap30), float(ap50), float(ap70)
+
+
+def _maybe_export_readiness_panel(
+    *,
+    batch_data,
+    sample_index: int,
+    noplugin_post_ret,
+    plugin_post_ret,
+    pc_range,
+    left_hand: bool,
+    frames_dir: str,
+    render_mode: str,
+    crop_size: float,
+    score_thresh: float,
+    ppm: int,
+    running_metrics: tuple[float, float, float],
+):
+    from scripts.readiness_vis_utils import build_compare_panel
+
+    pcd = batch_data["ego"]["origin_lidar"][0].detach().cpu()
+    panel_img, crop_meta = build_compare_panel(
+        _post_ret_to_vis_result(noplugin_post_ret),
+        _post_ret_to_vis_result(plugin_post_ret),
+        pcd=pcd,
+        pc_range=pc_range,
+        left_hand=left_hand,
+        score_thresh=score_thresh,
+        crop_size=crop_size,
+        render_mode=render_mode,
+        ppm=ppm,
+    )
+    panel_filename = f"frame_{sample_index:05d}.png"
+    panel_path = os.path.join(frames_dir, panel_filename)
+    panel_img.save(panel_path)
+    ap30, ap50, ap70 = running_metrics
+    return {
+        "sample_index": int(sample_index),
+        "panel_path": panel_filename,
+        "running_ap30": ap30 * 100.0,
+        "running_ap50": ap50 * 100.0,
+        "running_ap70": ap70 * 100.0,
+        "crop_range": crop_meta.get("crop_range"),
+        "scene_score": crop_meta.get("scene_score", 0.0),
+    }
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -299,6 +521,14 @@ def main() -> None:
     elif fusion_core != "intermediateheterinfer":
         hypes["fusion"]["core_method"] = fusion_core + "infer"
     hypes = update_dict(hypes, {"ego_modality": "m1"})
+
+    if opt.strict_n_car > 0:
+        hypes['strict_n_car'] = opt.strict_n_car
+        print(f"[online-ttt] strict_n_car={hypes['strict_n_car']} (only evaluate scenes with exactly {opt.strict_n_car} agents)")
+
+    if opt.assignment_path:
+        hypes['heter']['assignment_path'] = opt.assignment_path
+        print(f"[online-ttt] override assignment_path={opt.assignment_path}")
 
     # Fix mapping_dict: training may save 'none' for unused modalities in v2v mode
     md = hypes.get("heter", {}).get("mapping_dict", {})
@@ -347,7 +577,7 @@ def main() -> None:
         optimizer = None
     else:
         for name, p in model.named_parameters():
-            trainable = name.startswith("plugin")
+            trainable = name.startswith("plugin") or name.startswith("plugins.")
             if opt.train_fusion and "v2xvit_levels" in name:
                 trainable = True
             p.requires_grad_(trainable)
@@ -366,16 +596,29 @@ def main() -> None:
         optimizer = torch.optim.Adam(train_params, lr=opt.lr, weight_decay=opt.weight_decay)
 
         model.eval()
-        if hasattr(model, "plugin"):
+        if hasattr(model, "plugin") and model.plugin is not None:
             model.plugin.train()
+        if hasattr(model, "plugins") and model.plugins is not None:
+            model.plugins.train()
 
     # ── Build dataset / loader ─────────────────────────────────────────────
     if opt.score_threshold is not None:
         hypes["postprocess"]["target_args"]["score_threshold"] = opt.score_threshold
         print(f"[online-ttt] override score_threshold={opt.score_threshold}")
-    dataset = build_dataset(hypes, visualize=False, train=False)
+    export_frames_enabled = (not opt.no_plugin) and opt.export_frame_interval > 0
+    export_frames_dir = opt.export_frame_dir or os.path.join(out_dir, "readiness_frames")
+    export_frames_meta = []
+    if export_frames_enabled:
+        os.makedirs(export_frames_dir, exist_ok=True)
+        print(
+            f"[online-ttt] readiness frame export enabled: interval={opt.export_frame_interval}, "
+            f"dir={export_frames_dir}"
+        )
+
+    dataset = build_dataset(hypes, visualize=export_frames_enabled, train=False)
+    dataset_for_loader = _maybe_shuffle_test_dataset(dataset, opt, out_dir)
     loader = DataLoader(
-        dataset,
+        dataset_for_loader,
         batch_size=1,
         num_workers=opt.num_workers,
         collate_fn=dataset.collate_batch_test,
@@ -384,17 +627,23 @@ def main() -> None:
         drop_last=False,
     )
 
-    total_samples = len(dataset)
+    total_samples = len(dataset_for_loader)
     total_epochs = 1 if opt.no_plugin else max(opt.epochs, 1)
     convergence_log = []  # [(sample_idx, ap30, ap50, ap70), ...]
+    use_mc_eval = _use_multi_class_eval(hypes)
+    if use_mc_eval:
+        result_stat = _init_result_stats_mc()
+        result_stat_short = result_stat_middle = result_stat_long = None
+        print("[online-ttt] using overall multi-class evaluator (no short/middle/long split)")
+    else:
+        result_stat, result_stat_short, result_stat_middle, result_stat_long = _init_result_stats_single()
+    pc_range = hypes["postprocess"]["gt_range"]
+    left_hand = _left_hand_from_hypes(hypes)
 
     # ── Multi-epoch loop ───────────────────────────────────────────────────
     for epoch in range(total_epochs):
         is_eval_epoch = (epoch == total_epochs - 1)
         tag = "eval" if is_eval_epoch else "warmup"
-
-        if is_eval_epoch:
-            result_stat, result_stat_short, result_stat_middle, result_stat_long = _init_result_stats()
 
         running_loss = 0.0
         print(f"\n[online-ttt] epoch {epoch+1}/{total_epochs} ({tag}) — {total_samples} samples")
@@ -402,9 +651,23 @@ def main() -> None:
         for i, batch_data in enumerate(loader):
             if batch_data is None:
                 continue
+            if opt.max_eval_samples > 0 and i >= opt.max_eval_samples:
+                print(f"[online-ttt] max_eval_samples reached at sample {i}; stopping early for debug.")
+                break
 
             batch_data = train_utils.to_device(batch_data, device)
             cav_content = batch_data["ego"]
+            sample_index = i + 1
+            should_export_frame = (
+                export_frames_enabled
+                and is_eval_epoch
+                and sample_index % opt.export_frame_interval == 0
+                and (
+                    opt.export_frame_limit <= 0
+                    or len(export_frames_meta) < opt.export_frame_limit
+                )
+            )
+            noplugin_out = None
 
             if opt.no_plugin:
                 # ── No-plugin baseline: inference only ────────────────
@@ -416,6 +679,9 @@ def main() -> None:
                     teacher_out = _run_neighbor_teacher_forward(model, cav_content, device)
                 else:
                     teacher_out = _run_teacher_forward(model, cav_content, device)
+
+                if should_export_frame:
+                    noplugin_out = _run_noplugin_coop_forward(model, cav_content)
 
                 # ── Student forward: full fusion with plugin ───────────────
                 student_out = model(cav_content)
@@ -441,40 +707,89 @@ def main() -> None:
                     post_ret = dataset.post_process(
                         batch_data, output_dict
                     )
-                    pred_box_tensor, pred_score, gt_box_tensor = post_ret[0], post_ret[1], post_ret[2]
-                    # 3-class post_process returns score_labels [N,2]; extract scores only
-                    if pred_score is not None and pred_score.dim() == 2:
-                        pred_score = pred_score[:, 0]
-                    for iou_thresh in [0.3, 0.5, 0.7]:
-                        eval_utils.caluclate_tp_fp(
-                            pred_box_tensor, pred_score, gt_box_tensor,
-                            result_stat, iou_thresh
+                    if use_mc_eval:
+                        pred_box_tensor, pred_conf, pred_label_tensor, gt_box_tensor, gt_label_tensor = \
+                            _parse_mc_eval_tensors(post_ret)
+                        _update_result_stats_mc(
+                            pred_box_tensor,
+                            pred_conf,
+                            pred_label_tensor,
+                            gt_box_tensor,
+                            gt_label_tensor,
+                            result_stat,
                         )
-                        eval_utils.caluclate_tp_fp(
-                            pred_box_tensor, pred_score, gt_box_tensor,
-                            result_stat_short, iou_thresh,
-                            left_range=0, right_range=30
-                        )
-                        eval_utils.caluclate_tp_fp(
-                            pred_box_tensor, pred_score, gt_box_tensor,
-                            result_stat_middle, iou_thresh,
-                            left_range=30, right_range=50
-                        )
-                        eval_utils.caluclate_tp_fp(
-                            pred_box_tensor, pred_score, gt_box_tensor,
-                            result_stat_long, iou_thresh,
-                            left_range=50, right_range=100
-                        )
+                    else:
+                        pred_box_tensor, pred_score, gt_box_tensor = post_ret[0], post_ret[1], post_ret[2]
+                        if pred_score is not None and pred_score.dim() == 2:
+                            pred_score = pred_score[:, 0]
+                        for iou_thresh in _EVAL_IOUS:
+                            eval_utils.caluclate_tp_fp(
+                                pred_box_tensor, pred_score, gt_box_tensor,
+                                result_stat, iou_thresh
+                            )
+                            eval_utils.caluclate_tp_fp(
+                                pred_box_tensor, pred_score, gt_box_tensor,
+                                result_stat_short, iou_thresh,
+                                left_range=0, right_range=30
+                            )
+                            eval_utils.caluclate_tp_fp(
+                                pred_box_tensor, pred_score, gt_box_tensor,
+                                result_stat_middle, iou_thresh,
+                                left_range=30, right_range=50
+                            )
+                            eval_utils.caluclate_tp_fp(
+                                pred_box_tensor, pred_score, gt_box_tensor,
+                                result_stat_long, iou_thresh,
+                                left_range=50, right_range=100
+                            )
+
+                current_metrics = None
+                if should_export_frame and not use_mc_eval:
+                    current_metrics = _compute_running_metrics_single(result_stat)
+                    noplugin_post_ret = dataset.post_process(batch_data, {"ego": noplugin_out})
+                    export_meta = _maybe_export_readiness_panel(
+                        batch_data=batch_data,
+                        sample_index=sample_index,
+                        noplugin_post_ret=noplugin_post_ret,
+                        plugin_post_ret=post_ret,
+                        pc_range=pc_range,
+                        left_hand=left_hand,
+                        frames_dir=export_frames_dir,
+                        render_mode=opt.export_frame_render_mode,
+                        crop_size=opt.export_frame_crop_size,
+                        score_thresh=opt.export_frame_score_thresh,
+                        ppm=opt.export_frame_ppm,
+                        running_metrics=current_metrics,
+                    )
+                    export_frames_meta.append(export_meta)
+                    print(
+                        f"[readiness-vis] sample {sample_index}: "
+                        f"AP@50={export_meta['running_ap50']:.2f} "
+                        f"saved {export_meta['panel_path']}"
+                    )
 
                 # ── Convergence checkpoint ─────────────────────────────
                 if opt.convergence_interval > 0 and (i + 1) % opt.convergence_interval == 0:
-                    import copy as _copy
-                    _snap = _copy.deepcopy(result_stat)
-                    _a30, _, _ = eval_utils.calculate_ap(_snap, 0.3)
-                    _a50, _, _ = eval_utils.calculate_ap(_snap, 0.5)
-                    _a70, _, _ = eval_utils.calculate_ap(_snap, 0.7)
-                    convergence_log.append((i + 1, float(_a30), float(_a50), float(_a70)))
-                    print(f"[convergence] sample {i+1}: AP@30={_a30:.4f} AP@50={_a50:.4f} AP@70={_a70:.4f}")
+                    if use_mc_eval:
+                        _snap = copy.deepcopy(result_stat)
+                        _m30 = _calculate_map_mc(_snap, 0.3)
+                        _m50 = _calculate_map_mc(_snap, 0.5)
+                        _m70 = _calculate_map_mc(_snap, 0.7)
+                        convergence_log.append((i + 1, _m30, _m50, _m70))
+                        print(
+                            f"[convergence] sample {i+1}: "
+                            f"mAP@30={_m30:.4f} mAP@50={_m50:.4f} mAP@70={_m70:.4f}"
+                        )
+                    else:
+                        if current_metrics is None:
+                            _a30, _a50, _a70 = _compute_running_metrics_single(result_stat)
+                        else:
+                            _a30, _a50, _a70 = current_metrics
+                        convergence_log.append((i + 1, float(_a30), float(_a50), float(_a70)))
+                        print(
+                            f"[convergence] sample {i+1}: "
+                            f"AP@30={_a30:.4f} AP@50={_a50:.4f} AP@70={_a70:.4f}"
+                        )
 
             # ── Logging ────────────────────────────────────────────────
             if not opt.no_plugin and opt.log_interval > 0 and (i + 1) % opt.log_interval == 0:
@@ -489,22 +804,25 @@ def main() -> None:
 
     # ── Final evaluation ───────────────────────────────────────────────────
     print("\n" + "=" * 60)
-    for tag, stat in [
-        ("short", result_stat_short),
-        ("middle", result_stat_middle),
-        ("long", result_stat_long),
-        ("overall", result_stat),
-    ]:
-        ap30, _, _ = eval_utils.calculate_ap(stat, 0.3)
-        ap50, _, _ = eval_utils.calculate_ap(stat, 0.5)
-        ap70, _, _ = eval_utils.calculate_ap(stat, 0.7)
-        print(
-            f"{tag:>8s} The Average Precision at IOU 0.3 is {ap30:.4f}, "
-            f"The Average Precision at IOU 0.5 is {ap50:.4f}, "
-            f"The Average Precision at IOU 0.7 is {ap70:.4f}"
-        )
+    if use_mc_eval:
+        eval_utils_mc.eval_final_results(result_stat, out_dir)
+    else:
+        for tag, stat in [
+            ("short", result_stat_short),
+            ("middle", result_stat_middle),
+            ("long", result_stat_long),
+            ("overall", result_stat),
+        ]:
+            ap30, _, _ = eval_utils.calculate_ap(stat, 0.3)
+            ap50, _, _ = eval_utils.calculate_ap(stat, 0.5)
+            ap70, _, _ = eval_utils.calculate_ap(stat, 0.7)
+            print(
+                f"{tag:>8s} The Average Precision at IOU 0.3 is {ap30:.4f}, "
+                f"The Average Precision at IOU 0.5 is {ap50:.4f}, "
+                f"The Average Precision at IOU 0.7 is {ap70:.4f}"
+            )
 
-    eval_utils.eval_final_results(result_stat, out_dir, "online_ttt")
+        eval_utils.eval_final_results(result_stat, out_dir, "online_ttt")
 
     # ── Save convergence log ──────────────────────────────────────────────
     if convergence_log:
@@ -512,6 +830,22 @@ def main() -> None:
         with open(conv_path, "w") as f:
             json.dump(convergence_log, f)
         print(f"[convergence] saved {len(convergence_log)} checkpoints to {conv_path}")
+
+    if export_frames_meta:
+        frames_payload = {
+            "model_dir": opt.model_dir,
+            "output_dir": out_dir,
+            "export_frame_interval": int(opt.export_frame_interval),
+            "render_mode": opt.export_frame_render_mode,
+            "crop_size": float(opt.export_frame_crop_size),
+            "score_thresh": float(opt.export_frame_score_thresh),
+            "ppm": int(opt.export_frame_ppm),
+            "frames": export_frames_meta,
+        }
+        frames_json_path = os.path.join(export_frames_dir, "frames.json")
+        with open(frames_json_path, "w") as f:
+            json.dump(frames_payload, f, indent=2)
+        print(f"[readiness-vis] saved {len(export_frames_meta)} frames metadata to {frames_json_path}")
 
     # ── Save checkpoint ────────────────────────────────────────────────────
     ckpt_path = os.path.join(out_dir, "net_epoch_bestval_at0.pth")
@@ -536,6 +870,8 @@ def main() -> None:
                     "boost_weight": opt.boost_weight,
                     "boost_lo": opt.boost_lo,
                     "boost_hi": opt.boost_hi,
+                    "src_modality": opt.src_modality,
+                    "src_modalities": opt.src_modalities,
                     "plugin_adain_alpha_init_logit": opt.plugin_adain_alpha_init_logit,
                     "teacher_mode": opt.teacher_mode,
                 },

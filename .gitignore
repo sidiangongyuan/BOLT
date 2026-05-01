@@ -39,9 +39,17 @@ assets/
 prompts.md
 AGENTS.md
 DIRECT_HETER.md
+review.md
+review*.md
+neurips_*.aux
+neurips_*.log
+neurips_*.fdb_latexmk
+neurips_*.fls
 
 # AI tool configs
 .claude/
+.codex
+.codex/
 .mcp.json
 
 # Scripts — only keep train.sh, run_heal_stage2.sh, inference.sh
