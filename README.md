@@ -69,31 +69,28 @@ In the preparation-free setting, vanilla unadapted fusion typically falls *below
 - 📈 **Surpasses ego-only** on every evaluated encoder pair across DAIR-V2X and OPV2V.
 - 🪶 Trains only **~0.9M parameters** per plugin.
 
-See the paper for full tables, ablations, and qualitative BEV comparisons.
+<p align="center">
+  <img src="images/radar_intro.png" width="42%"/>
+  &nbsp;&nbsp;
+  <img src="images/convergence.png" width="52%"/>
+</p>
+<p align="center"><sub>
+  <b>Left:</b> performance across encoder pairs — vanilla fusion (red) drops below ego-only, BOLT (blue) consistently surpasses it.
+  &nbsp;&nbsp;
+  <b>Right:</b> AP@50 improves online as more frames stream in.
+</sub></p>
 
----
+### Qualitative BEV — with vs. without BOLT
 
-## 🧠 Method at a Glance
+<p align="center">
+  <img src="images/bev_comparison.png" width="92%"/>
+</p>
+<p align="center"><sub>
+  Each pair shares the same scene; the left tile uses vanilla cross-agent fusion, the right tile uses BOLT.
+  Green = ground truth, red = predictions. Without BOLT, fused predictions drift, duplicate, or miss objects in the neighbor's view; with BOLT, predictions snap back onto the true objects.
+</sub></p>
 
-BOLT is a thin, frozen-everything-except-the-plugin design.
-
-```
-                                Ego stream                                  Frozen
-   ┌──────────┐   F_e     ┌──────────────────────────┐
-   │ Ego enc. │ ───────►  │                          │     ┌────────┐
-   └──────────┘           │   Frozen Fusion Module   │ ──► │ Frozen │ ──► detections
-   ┌──────────┐   F_n     │                          │     │  Head  │
-   │ Nbr enc. │ ──┐  ┌──► │                          │     └────────┘
-   └──────────┘   │  │    └──────────────────────────┘
-                  ▼  │
-            ┌────────────┐                              Ego logits
-            │  Plugin θ  │ ◄──── ego-as-teacher ────────  (no labels)
-            └────────────┘            (online)
-            (~0.9M params,
-             only trainable)
-```
-
-The plugin has three stages — **statistical alignment → semantic transformation → selective gating** — each designed so its own no-op configuration recovers an exact identity at initialization. This guarantees that an *un*adapted plugin never makes cooperation worse than it already is, while a *trained* plugin closes the cross-agent feature gap.
+See the paper for full tables, ablations, and additional qualitative results.
 
 ---
 
