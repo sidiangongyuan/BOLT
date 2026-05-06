@@ -221,7 +221,7 @@ If you find BOLT useful, please cite:
 @article{bolt2026,
   title   = {BOLT: Base-free Online Lightweight Adaptation for Preparation-Free Heterogeneous Cooperative Perception},
   author  = {Yang, Kang and Bu, Tianci and Wang, Peng and Li, Deying and Wang, Yongcai},
-  journal = {arXiv preprint arXiv:ARXIV_ID},
+  journal = {arXiv preprint 2605.00405},
   year    = {2026}
 }
 ```
