@@ -1,7 +1,7 @@
 <div align="center">
 
 # 🚦 BOLT
-### Base-free Online Lightweight Adaptation<br/>for Preparation-Free Heterogeneous Cooperative Perception
+### Online Lightweight Adaptation for Preparation-Free Heterogeneous Cooperative Perception
 
 <!-- Badges: replace ARXIV_ID after the arXiv upload -->
 [![arXiv](https://img.shields.io/badge/arXiv-pending-b31b1b.svg)](https://arxiv.org/abs/ARXIV_ID)
