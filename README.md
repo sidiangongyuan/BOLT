@@ -4,7 +4,7 @@
 ### Online Lightweight Adaptation for Preparation-Free Heterogeneous Cooperative Perception
 
 <!-- Badges: replace ARXIV_ID after the arXiv upload -->
-[![arXiv](https://img.shields.io/badge/arXiv-pending-b31b1b.svg)](https://arxiv.org/abs/ARXIV_ID)
+[![arXiv](https://img.shields.io/badge/arXiv-pending-b31b1b.svg)]([https://arxiv.org/abs/ARXIV_ID](https://arxiv.org/abs/2605.00405))
 [![Project Status: Code Released](https://img.shields.io/badge/status-code%20released-brightgreen.svg)](#-news)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.8](https://img.shields.io/badge/Python-3.8-blue.svg)](https://www.python.org/)
