@@ -201,11 +201,6 @@ scripts/
 ├── inference/                        # Off-the-shelf inference
 ├── train/                            # End-to-end training
 └── more_agents/                      # Multi-agent (3+ cars) assembly + adaptation
-```
-
-> **Note.** This release contains the minimal code needed to reproduce BOLT's core method. Auxiliary scripts used only for paper-specific ablations, visualization, and analysis are not included; the public release will track only the method itself.
-
----
 
 ## 🙏 Acknowledgements
 
