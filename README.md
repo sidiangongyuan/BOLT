@@ -205,6 +205,7 @@ scripts/
 ## 🙏 Acknowledgements
 
 This codebase is built on top of [**HEAL**](https://github.com/yifanlu0227/HEAL) and [**OpenCOOD**](https://github.com/DerrickXuNu/OpenCOOD). We thank the authors of DAIR-V2X, OPV2V, OPV2V-H, and V2X-Real for releasing the datasets that made this work possible.
+```
 
 ---
 
@@ -219,7 +220,7 @@ If you find BOLT useful, please cite:
   journal = {arXiv preprint 2605.00405},
   year    = {2026}
 }
-
+```
 
 ## 📄 License
 
