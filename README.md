@@ -219,11 +219,7 @@ If you find BOLT useful, please cite:
   journal = {arXiv preprint 2605.00405},
   year    = {2026}
 }
-```
 
-*(BibTeX will be updated once the arXiv ID is assigned.)*
-
----
 
 ## 📄 License
 
